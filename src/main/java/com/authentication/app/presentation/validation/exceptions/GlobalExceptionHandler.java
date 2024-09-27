@@ -2,10 +2,9 @@ package com.authentication.app.presentation.validation.exceptions;
 
 import java.util.Map;
 
-import org.springframework.http.HttpHeaders;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -34,12 +33,12 @@ public class GlobalExceptionHandler {
                 .stream().map(FieldError::getDefaultMessage)
                 .findFirst().orElse(ex.getMessage());
 
-        return new ResponseEntity<>(Map.of(KEY, error), new HttpHeaders(), HttpStatus.BAD_REQUEST);
+        return new ResponseEntity<>(Map.of(KEY, error), HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(NoResultException.class)
     private ResponseEntity<Map<String, String>> handleEntityNotFound(NoResultException ex) {
-        return new ResponseEntity<>(Map.of(KEY, ex.getMessage()), new HttpHeaders(), HttpStatus.NOT_FOUND);
+        return new ResponseEntity<>(Map.of(KEY, ex.getMessage()), HttpStatus.NOT_FOUND);
     }
 
     @ExceptionHandler(JWTVerificationException.class)
@@ -60,5 +59,10 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(UserNotEnableException.class)
     public ResponseEntity<Map<String, String>> handleUserNotEnableException(UserNotEnableException ex) {
         return new ResponseEntity<>(Map.of(KEY, ex.getMessage()), HttpStatus.UNAUTHORIZED);
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, String>> handleDataIntegrityViolationException(DataIntegrityViolationException ex) {
+        return new ResponseEntity<>(Map.of(KEY, ex.getMessage()), HttpStatus.BAD_REQUEST);
     }
 }

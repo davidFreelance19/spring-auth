@@ -1,9 +1,11 @@
 package com.authentication.app.services;
 
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -16,15 +18,19 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import com.auth0.jwt.exceptions.JWTVerificationException;
+import com.authentication.app.domain.dtos.request.CodeOtpDto;
 import com.authentication.app.domain.dtos.request.LoginDto;
 import com.authentication.app.domain.dtos.request.RegisterUserDto;
+import com.authentication.app.domain.entities.CodeOtpEntity;
 import com.authentication.app.domain.entities.CredentialEntity;
 import com.authentication.app.domain.entities.UserEntity;
+import com.authentication.app.domain.repositories.CodeOtpRepository;
 import com.authentication.app.domain.repositories.CredentialsRepository;
 import com.authentication.app.domain.repositories.UserRepository;
 import com.authentication.app.domain.services.IAuthService;
 import com.authentication.app.domain.services.IEmailService;
 import com.authentication.app.presentation.validation.exceptions.custom.UserNotEnableException;
+import com.authentication.app.utils.GenerateOtpCodeUtil;
 import com.authentication.app.utils.JwtUtil;
 
 import jakarta.mail.MessagingException;
@@ -37,21 +43,27 @@ public class AuthServiceImpl implements IAuthService, UserDetailsService{
 
     private final CredentialsRepository credentialRepository;
     private final UserRepository userRepository;
+    private final CodeOtpRepository codeOtpRepository;
     private final IEmailService emailService;
     private final JwtUtil jwtUtil;
+    private final GenerateOtpCodeUtil generateOtpCodeUtil;
     private final PasswordEncoder passwordEncoder;
 
     AuthServiceImpl(
         CredentialsRepository credentialRepository, 
         UserRepository userRepository, 
+        CodeOtpRepository codeOtpRepository,
         IEmailService emailService,
-        JwtUtil jwtUtil, 
+        JwtUtil jwtUtil,
+        GenerateOtpCodeUtil generateOtpCodeUtil,
         PasswordEncoder passwordEncoder
     ){
         this.credentialRepository = credentialRepository;
         this.userRepository = userRepository;
+        this.codeOtpRepository = codeOtpRepository;
         this.emailService = emailService;
         this.jwtUtil = jwtUtil;
+        this.generateOtpCodeUtil = generateOtpCodeUtil;
         this.passwordEncoder = passwordEncoder;
     }
 
@@ -61,9 +73,11 @@ public class AuthServiceImpl implements IAuthService, UserDetailsService{
             UserEntity newUser = this.userRepository.save(generateUser(dto));
 
             this.credentialRepository.save(generateCredential(dto, newUser));
-            
+            CodeOtpEntity code = this.codeOtpRepository.save(generateCodeOtp(newUser));
+
             String token = this.jwtUtil.genereteTokenBySendEmail(dto.getEmail());
-            emailService.sendEmailVerifyAccount(dto.getEmail(), token);
+            String refreshToken = this.jwtUtil.genereteRefreshTokenBySendEmail(dto.getEmail());
+            emailService.sendEmailVerifyAccount(dto.getEmail(), token, code.getCode(), refreshToken);
 
             return Map.of("user", this.userRepository.save(newUser));
         } catch (MessagingException e) {
@@ -129,17 +143,51 @@ public class AuthServiceImpl implements IAuthService, UserDetailsService{
     }
 
     @Override
-    public final Map<String, String> verifyAccount(String token) {
+    public final Map<String, String> verifyAccount(String token, CodeOtpDto dto) {
         try {
             String email = jwtUtil.extractUser(jwtUtil.validateToken(token));
 
             CredentialEntity credential = this.credentialRepository.findByEmail(email);
+            if(credential.isEnabled())
+                throw new DataIntegrityViolationException("Account is already verified");
+
+            CodeOtpEntity code = this.codeExists(credential.getUser(), dto.getCode());
+
             credential.setEnabled(true);
             this.credentialRepository.save(credential);
 
+            this.codeOtpRepository.delete(code);
             return Map.of(MESSAGE, "Account verified");
         } catch (JWTVerificationException e) {
             throw new JWTVerificationException("Invalid token");
+        } catch (NoResultException e) {
+            throw new NoResultException(e.getMessage());
+        }
+    }
+
+    @Override
+    public Map<String, String> sendNewCodeByVerifyAccount(String refreshToken) throws MessagingException {
+        try {
+            String email = jwtUtil.extractUser(jwtUtil.validateToken(refreshToken));
+            CredentialEntity credential = userExist(email);
+
+            if(credential.isEnabled())
+                throw new DataIntegrityViolationException("Account is already verified");
+
+            if(this.codeOtpRepository.findByUser(credential.getUser()) != null)
+                throw new DataIntegrityViolationException("You have already a code, check your email");
+
+            String token = this.jwtUtil.genereteTokenBySendEmail(email);
+            CodeOtpEntity newCode = this.codeOtpRepository.save(generateCodeOtp(credential.getUser()));
+            emailService.sendEmailVerifyAccount(email, token, newCode.getCode(), jwtUtil.genereteRefreshTokenBySendEmail(email));
+
+            return Map.of(MESSAGE, "Email sent, check your inbox and follow the instructions");
+        } catch (JWTVerificationException e) {
+            throw new JWTVerificationException("Invalid token");
+        } catch (DataIntegrityViolationException e) {
+            throw new DataIntegrityViolationException(e.getMessage());
+        } catch (NoResultException e) {
+            throw new NoResultException(e.getMessage());
         }
     }
 
@@ -151,14 +199,21 @@ public class AuthServiceImpl implements IAuthService, UserDetailsService{
             if(!credential.isEnabled())
                   throw new UserNotEnableException("Account is not verified");
 
+            if(codeOtpRepository.findByUser(credential.getUser()) != null)
+                throw new DataIntegrityViolationException("You have already a code, check your email");
+
             String token = jwtUtil.genereteTokenBySendEmail(email);
-            emailService.sendEmailRecupereAccount(email, token);
+            CodeOtpEntity code = this.codeOtpRepository.save(generateCodeOtp(credential.getUser()));
+            
+            emailService.sendEmailRecupereAccount(email, token, code.getCode());
 
             return Map.of(MESSAGE, "Email sent, check your inbox and follow the instructions");
         } catch(NoResultException e){
             throw new NoResultException(e.getMessage());
         } catch (UserNotEnableException e) {
             throw new UserNotEnableException(e.getMessage());
+        } catch (DataIntegrityViolationException e) {
+            throw new DataIntegrityViolationException(e.getMessage());
         } catch (MessagingException e) {
             throw new MessagingException(e.getMessage());
         }
@@ -173,6 +228,9 @@ public class AuthServiceImpl implements IAuthService, UserDetailsService{
             credential.setPassword(passwordEncoder.encode(newPassword));
             this.credentialRepository.save(credential);
 
+            CodeOtpEntity code = this.codeOtpRepository.findByUser(credential.getUser());
+            this.codeOtpRepository.delete(code);
+
             return Map.of(MESSAGE, "Password changed successfully");
         } catch (JWTVerificationException e) {
             throw new JWTVerificationException(e.getMessage());
@@ -181,7 +239,12 @@ public class AuthServiceImpl implements IAuthService, UserDetailsService{
 
     private CredentialEntity userExist(String email) throws NoResultException {
         return Optional.ofNullable(this.credentialRepository.findByEmail(email))
-                  .orElseThrow(() -> new NoResultException("User not exist"));
+                  .orElseThrow(() -> new NoResultException("User not exists"));
+    }
+
+    private CodeOtpEntity codeExists(UserEntity user, String code) throws NoResultException {
+        return Optional.ofNullable(this.codeOtpRepository.findByUserAndCode(user, code))
+                  .orElseThrow(() -> new NoResultException("Invalid code"));
     }
 
     private CredentialEntity generateCredential(RegisterUserDto dto, UserEntity newUser){
@@ -199,6 +262,15 @@ public class AuthServiceImpl implements IAuthService, UserDetailsService{
         return UserEntity.builder()
                 .name(dto.getName())
                 .lastname(dto.getLastname())
+                .build();
+    }
+
+    private CodeOtpEntity generateCodeOtp(UserEntity user){
+        String code = this.generateOtpCodeUtil.generateOtp();
+        return CodeOtpEntity.builder()
+                .user(user)
+                .code(code)
+                .createdAt(new Date())
                 .build();
     }
 }

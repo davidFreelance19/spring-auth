@@ -25,7 +25,8 @@ public class JwtUtil {
 
     @Value("${jwt.user.generator}")
     private String userGenerator;
-
+    
+    private final long refreshTokenValidity = 3 * 24 * 60 * 60 * 1000; // 3 días en milisegundos
 
     public String genereteTokenBySendEmail(String email){
         Algorithm algorithm = Algorithm.HMAC256(this.key);
@@ -34,6 +35,18 @@ public class JwtUtil {
                 .withSubject(email)
                 .withIssuedAt(new Date())
                 .withExpiresAt(new Date(System.currentTimeMillis() + 300000))
+                .withJWTId(UUID.randomUUID().toString())
+                .withNotBefore(new Date(System.currentTimeMillis()))
+                .sign(algorithm);
+    }
+
+    public String genereteRefreshTokenBySendEmail(String email){
+        Algorithm algorithm = Algorithm.HMAC256(this.key);
+        return JWT.create()
+                .withIssuer(this.userGenerator)
+                .withSubject(email)
+                .withIssuedAt(new Date())
+                .withExpiresAt(new Date(System.currentTimeMillis() + refreshTokenValidity))
                 .withJWTId(UUID.randomUUID().toString())
                 .withNotBefore(new Date(System.currentTimeMillis()))
                 .sign(algorithm);

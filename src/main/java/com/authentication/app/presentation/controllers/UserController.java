@@ -21,7 +21,7 @@ public class UserController {
         this.userService = userService;
     }
 
-    @GetMapping("/welcome")
+    @GetMapping("/home")
     public ResponseEntity<Map<String, UserEntity>> welcome(){
         return new ResponseEntity<>(this.userService.welcome(), HttpStatus.OK);
     }

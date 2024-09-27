@@ -27,7 +27,7 @@ public class CredentialEntity {
     private String email;
 
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
-    @Column(nullable = false, length = 110)
+    @Column(nullable = false, length = 150)
     private String password;
 
     @OneToOne(targetEntity = UserEntity.class)

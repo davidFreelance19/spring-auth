@@ -2,6 +2,7 @@ package com.authentication.app.domain.services;
 
 import java.util.Map;
 
+import com.authentication.app.domain.dtos.request.CodeOtpDto;
 import com.authentication.app.domain.dtos.request.LoginDto;
 import com.authentication.app.domain.dtos.request.RegisterUserDto;
 import com.authentication.app.domain.entities.UserEntity;
@@ -14,7 +15,9 @@ public interface IAuthService {
 
     public Map<String, String> login(LoginDto dto) throws UserNotEnableException;
 
-    public Map<String, String> verifyAccount(String token);
+    public Map<String, String> verifyAccount(String token, CodeOtpDto dto);
+
+    public Map<String, String> sendNewCodeByVerifyAccount(String token)throws MessagingException;
 
     public Map<String, String> recupereAccount(String email) throws MessagingException, UserNotEnableException;
 
